@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>结果展示 | input / output / target / prompt</title>
+  <style>
+    :root { --maxw: 1400px; --gap: 12px; --radius: 14px; --shadow: 0 6px 14px rgba(0,0,0,.08); }
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, "PingFang SC", "Noto Sans SC", Arial, sans-serif; margin: 0; color: #111; background: #fafafa; }
+    header { position: sticky; top:0; z-index: 10; background: #fff; border-bottom: 1px solid #eee; }
+    .wrap { max-width: var(--maxw); margin: 0 auto; padding: 14px 16px; }
+    h1 { font-size: 18px; margin: 0 0 8px; }
+    .toolbar { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; }
+    .controls { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; }
+    input[type="search"] { width: 320px; max-width: 100%; padding: 8px 10px; border: 1px solid #ddd; border-radius: 10px; }
+    label { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; }
+    select { padding: 6px 10px; border: 1px solid #ddd; border-radius: 10px; }
+
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: var(--gap); padding: 16px; max-width: var(--maxw); margin: 0 auto; }
+    .card { background: #fff; border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; border: 1px solid #eee; display: flex; flex-direction: column; }
+    .imgs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 12px; background: #f6f6f6; }
+    .imgs figure { margin: 0; }
+    .imgs img { width: 100%; height: 170px; object-fit: contain; background: #fff; border: 1px solid #eee; border-radius: 10px; cursor: zoom-in; }
+    .meta { padding: 10px 12px 12px; display: grid; gap: 8px; }
+    .id { font-weight: 600; font-size: 14px; color: #333; }
+    details { background: #fcfcfc; border: 1px solid #eee; border-radius: 10px; padding: 8px 10px; }
+    details > summary { cursor: pointer; font-weight: 600; }
+    pre { margin: 8px 0 0; white-space: pre-wrap; word-break: break-word; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; }
+
+    .muted { color: #666; font-size: 12px; }
+    .count { font-size: 13px; color: #444; }
+
+    /* Lightbox */
+    .lightbox { position: fixed; inset: 0; background: rgba(0,0,0,.85); display: none; align-items: center; justify-content: center; padding: 24px; z-index: 100; }
+    .lightbox img { max-width: 95vw; max-height: 90vh; background: #fff; border-radius: 10px; }
+    .lightbox.show { display: flex; }
+    .lightbox .hint { position: fixed; bottom: 14px; left: 0; right: 0; text-align: center; color: #ddd; font-size: 12px; }
+
+    footer { text-align: center; color: #888; font-size: 12px; padding: 28px 16px; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <h1>结果展示面板 <span class="count" id="count"></span></h1>
+      <div class="toolbar">
+        <div class="controls">
+          <input id="q" type="search" placeholder="搜索：按 id / prompt 关键词过滤… (回车)" />
+          <label><input type="checkbox" id="chk-input" checked> 显示 input</label>
+          <label><input type="checkbox" id="chk-output" checked> 显示 output</label>
+          <label><input type="checkbox" id="chk-target" checked> 显示 target</label>
+          <label>排序
+            <select id="sort">
+              <option value="id-asc">ID ⬆︎</option>
+              <option value="id-desc">ID ⬇︎</option>
+              <option value="prompt-asc">Prompt ⬆︎</option>
+              <option value="prompt-desc">Prompt ⬇︎</option>
+            </select>
+          </label>
+        </div>
+        <div class="muted">提示：点击图片可放大预览，Esc 退出</div>
+      </div>
+    </div>
+  </header>
+
+  <main class="grid" id="grid"></main>
+
+  <div class="lightbox" id="lightbox" role="dialog" aria-modal="true">
+    <img id="lightbox-img" alt="preview" />
+    <div class="hint">点击任意处或按 Esc 关闭</div>
+  </div>
+
+  <footer>纯静态页面 · 可离线，使用 manifest.json 渲染</footer>
+
+<script>
+  const state = { data: [], q: '', show: {input:true, output:true, target:true}, sort:'id-asc' };
+  const elGrid = document.getElementById('grid');
+  const elCount = document.getElementById('count');
+
+  function esc(s){ return (s||'').replace(/[&<>"']/g, m=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[m])); }
+  function byId(id){ return document.getElementById(id); }
+
+  function applySort(arr){
+    const [key,dir] = state.sort.split('-');
+    const mul = dir==='asc'? 1 : -1;
+    return [...arr].sort((a,b)=>{
+      let va = (key==='id'? a.id : (a.prompt||''));
+      let vb = (key==='id'? b.id : (b.prompt||''));
+      return va.localeCompare(vb, 'zh-Hans-CN') * mul;
+    });
+  }
+
+  function render(){
+    const q = state.q.trim().toLowerCase();
+    let arr = state.data.filter(it => {
+      if(!q) return true;
+      return (it.id.toLowerCase().includes(q) || (it.prompt||'').toLowerCase().includes(q));
+    });
+    arr = applySort(arr);
+    elGrid.innerHTML = arr.map(it => cardHTML(it)).join('');
+    elCount.textContent = `（显示 ${arr.length} / 总计 ${state.data.length}）`;
+    bindImageClicks();
+  }
+
+  function fig(label, src){
+    if(!src) return '';
+    return `<figure data-kind="${label}">
+      <img src="${esc(src)}" alt="${esc(label)}" loading="lazy" decoding="async" />
+      <figcaption class="muted" style="text-align:center;margin-top:4px;">${esc(label)}</figcaption>
+    </figure>`;
+  }
+
+  function cardHTML(it){
+    const show = state.show;
+    const imgs = [ show.input && fig('input', it.input), show.output && fig('output', it.output), show.target && fig('target', it.target) ]
+      .filter(Boolean).join('');
+    return `<article class="card" id="${esc(it.id)}">
+      <div class="imgs">${imgs}</div>
+      <div class="meta">
+        <div class="id">${esc(it.id)}</div>
+        <details>
+          <summary>Prompt</summary>
+          <pre>${esc(it.prompt || '')}</pre>
+        </details>
+      </div>
+    </article>`;
+  }
+
+  function bindImageClicks(){
+    const box = document.getElementById('lightbox');
+    const img = document.getElementById('lightbox-img');
+    elGrid.querySelectorAll('img').forEach(im => {
+      im.addEventListener('click', ()=>{ img.src = im.src; box.classList.add('show'); });
+    });
+    ['click','keyup'].forEach(ev=>{
+      box.addEventListener(ev, e=>{ if(ev==='click' || (ev==='keyup' && e.key==='Escape')) box.classList.remove('show'); });
+    });
+  }
+
+  // 交互
+  byId('q').addEventListener('change', e=>{ state.q = e.target.value; render(); });
+  byId('sort').addEventListener('change', e=>{ state.sort = e.target.value; render(); });
+  byId('chk-input').addEventListener('change', e=>{ state.show.input = e.target.checked; render(); });
+  byId('chk-output').addEventListener('change', e=>{ state.show.output = e.target.checked; render(); });
+  byId('chk-target').addEventListener('change', e=>{ state.show.target = e.target.checked; render(); });
+
+  // 读取清单
+  fetch('manifest.json?_=' + Date.now()).then(r=>{
+    if(!r.ok) throw new Error('无法读取 manifest.json');
+    return r.json();
+  }).then(data=>{ state.data = data; render(); }).catch(err=>{
+    elGrid.innerHTML = `<div style="padding:16px;">❌ ${esc(String(err))}。请确认已生成 manifest.json 并与 index.html 同级。</div>`;
+  });
+</script>
+</body>
+</html>
