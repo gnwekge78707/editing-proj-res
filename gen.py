@@ -14,7 +14,7 @@ def b_target(name):
     return m.group('base') if m else None
 
 def b_prompt(name):
-    m = re.match(r'^(?P<base>.+)-Prompt.*\.txt$', name, re.IGNORECASE)
+    m = re.match(r'^(?P<base>.+)-Prompt1-General\.txt$', name, re.IGNORECASE)
     return m.group('base') if m else None
 
 def parse_output_base(name: str):
@@ -55,7 +55,7 @@ def scan(inputs_dir: Path, outputs_dir: Path):
             'input': inputs[b].as_posix(),
             'target': targets[b].as_posix(),
             'output': outputs[b].as_posix(),
-            'prompt': prompts.get(b, '')
+            'prompt': prompts.get(b.replace("-Best", ""), '')
         })
 
     stats = {
